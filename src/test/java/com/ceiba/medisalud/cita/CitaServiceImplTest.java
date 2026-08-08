@@ -1,5 +1,6 @@
 package com.ceiba.medisalud.cita;
 
+import com.ceiba.medisalud.cita.dto.CancelacionResponse;
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
 import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
@@ -29,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -222,6 +225,65 @@ class CitaServiceImplTest {
         assertThat(response.franjasDisponibles())
                 .extracting(f -> f.horaInicio().toLocalDate().getDayOfWeek())
                 .doesNotContain(DayOfWeek.SUNDAY);
+    }
+
+    @Test
+    void cancelar_debeCambiarEstadoACancelada_yNoRegistrarPenalizacion_cuandoHayMasDe2HorasDeAntelacion() {
+        LocalDateTime fechaHora = LocalDateTime.now().plusDays(3);
+        Cita cita = new Cita(paciente, medico, fechaHora);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CancelacionResponse response = citaService.cancelar(cita.getId());
+
+        assertThat(response.estado()).isEqualTo(EstadoCita.CANCELADA);
+        assertThat(response.fechaCancelacion()).isNotNull();
+        assertThat(response.penalizacionRegistrada()).isFalse();
+        verify(penalizacionRepository, never()).save(any());
+    }
+
+    @Test
+    void cancelar_debeRegistrarPenalizacion_cuandoHayMenosDe2HorasDeAntelacion() {
+        LocalDateTime fechaHora = LocalDateTime.now().plusHours(1);
+        Cita cita = new Cita(paciente, medico, fechaHora);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CancelacionResponse response = citaService.cancelar(cita.getId());
+
+        assertThat(response.penalizacionRegistrada()).isTrue();
+        verify(penalizacionRepository).save(any());
+    }
+
+    @Test
+    void cancelar_debeRegistrarPenalizacion_cuandoLaCitaYaPaso() {
+        LocalDateTime fechaHora = LocalDateTime.now().minusHours(1);
+        Cita cita = new Cita(paciente, medico, fechaHora);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CancelacionResponse response = citaService.cancelar(cita.getId());
+
+        assertThat(response.penalizacionRegistrada()).isTrue();
+    }
+
+    @Test
+    void cancelar_debeLanzarResourceNotFoundException_cuandoLaCitaNoExiste() {
+        UUID idInexistente = UUID.randomUUID();
+        when(citaRepository.findById(idInexistente)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> citaService.cancelar(idInexistente))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void cancelar_debeLanzarConflictException_cuandoLaCitaYaEstaCancelada() {
+        Cita cita = new Cita(paciente, medico, LocalDateTime.now().plusDays(1));
+        cita.setEstado(EstadoCita.CANCELADA);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+
+        assertThatThrownBy(() -> citaService.cancelar(cita.getId()))
+                .isInstanceOf(ConflictException.class);
     }
 
     @Test

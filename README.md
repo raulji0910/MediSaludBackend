@@ -14,6 +14,7 @@ MVP backend para digitalizar el agendamiento de citas de la clínica MediSalud: 
   - [Pacientes (RF-02)](#pacientes-rf-02)
   - [Citas (RF-03)](#citas-rf-03)
   - [Disponibilidad (RF-04)](#disponibilidad-rf-04)
+  - [Cancelación (RF-05)](#cancelación-rf-05)
 - [Reglas de negocio implementadas](#reglas-de-negocio-implementadas)
 
 ## Tecnologías utilizadas
@@ -458,6 +459,46 @@ GET /api/citas/disponibilidad?medicoId=a1a1a1a1-0001-4000-8000-000000000001&fech
 
 **Response — 404 Not Found**: si `medicoId` no existe.
 
+---
+
+### Cancelación (RF-05)
+
+Cancela una cita `PROGRAMADA` y aplica RN-05: si la cancelación ocurre con **menos de 2 horas** de antelación a la hora programada de la cita (o la cita ya pasó), se registra una `Penalizacion` para el paciente. La respuesta indica explícitamente si se registró la penalización, para que el consumidor de la API no tenga que inferirlo.
+
+#### `PUT /api/citas/{id}/cancelar` — Cancelar una cita
+
+**Request**: sin cuerpo, solo el id de la cita en la URL.
+
+```http
+PUT /api/citas/5c415597-ecd7-4928-8f81-ab7ddc3ecdc7/cancelar
+```
+
+**Response — 200 OK**
+
+```json
+{
+  "citaId": "5c415597-ecd7-4928-8f81-ab7ddc3ecdc7",
+  "estado": "CANCELADA",
+  "fechaCancelacion": "2026-08-08T19:26:47.210449200Z",
+  "penalizacionRegistrada": false
+}
+```
+
+**Response — 404 Not Found**: si la cita no existe.
+
+**Response — 409 Conflict**: si la cita no está en estado `PROGRAMADA` (ya fue cancelada o ya fue atendida).
+
+```json
+{
+  "timestamp": "2026-08-08T19:26:47.299510200Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Solo se pueden cancelar citas en estado PROGRAMADA",
+  "path": "/api/citas/5c415597-ecd7-4928-8f81-ab7ddc3ecdc7/cancelar",
+  "validationErrors": null
+}
+```
+
 ## Reglas de negocio implementadas
 
 | Regla | Estado | Dónde se aplica |
@@ -467,7 +508,7 @@ GET /api/citas/disponibilidad?medicoId=a1a1a1a1-0001-4000-8000-000000000001&fech
 | RN-03 — Edad mínima 0 años, sin fechas de nacimiento futuras | ✅ | Validado en el registro del paciente (RF-02) y defensivamente al reservar |
 | RN-04 — Un paciente no puede tener dos citas en la misma franja, sin importar el médico (conflicto global de agenda) | ✅ | `CitaService.reservar` → `409` |
 | RN-05 (parte 1) — Bloquear el agendamiento si el paciente tiene 3+ penalizaciones en 30 días | ✅ | `CitaService.reservar` → `400` |
-| RN-05 (parte 2) — Registrar la penalización al cancelar con menos de 2h de antelación | ⏳ Pendiente | Se implementa junto con RF-05 (Cancelación) |
-| RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Depende de RF-05 |
+| RN-05 (parte 2) — Registrar la penalización al cancelar con menos de 2h de antelación | ✅ | `CitaService.cancelar` → `PUT /api/citas/{id}/cancelar` |
+| RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Depende de RF-05 (ya completo) — se implementa a continuación |
 
-*La sección de Citas se seguirá ampliando con RF-05 (cancelación) y RF-06 (listado con filtros).*
+*La sección de Citas se seguirá ampliando con RF-06 (listado con filtros) y RN-06 (reprogramación).*

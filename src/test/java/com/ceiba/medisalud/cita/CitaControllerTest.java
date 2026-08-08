@@ -1,5 +1,6 @@
 package com.ceiba.medisalud.cita;
 
+import com.ceiba.medisalud.cita.dto.CancelacionResponse;
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
 import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -128,6 +130,37 @@ class CitaControllerTest {
 
         mockMvc.perform(get("/api/citas/{id}", id))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void cancelar_debeRetornar200_conElEstadoCancelada() throws Exception {
+        UUID id = UUID.randomUUID();
+        CancelacionResponse response = new CancelacionResponse(id, EstadoCita.CANCELADA, Instant.now(), false);
+        when(citaService.cancelar(id)).thenReturn(response);
+
+        mockMvc.perform(put("/api/citas/{id}/cancelar", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("CANCELADA"))
+                .andExpect(jsonPath("$.penalizacionRegistrada").value(false));
+    }
+
+    @Test
+    void cancelar_debeRetornar404_cuandoLaCitaNoExiste() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(citaService.cancelar(id)).thenThrow(new ResourceNotFoundException("No existe una cita con id " + id));
+
+        mockMvc.perform(put("/api/citas/{id}/cancelar", id))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void cancelar_debeRetornar409_cuandoLaCitaYaEstaCancelada() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(citaService.cancelar(id))
+                .thenThrow(new ConflictException("Solo se pueden cancelar citas en estado PROGRAMADA"));
+
+        mockMvc.perform(put("/api/citas/{id}/cancelar", id))
+                .andExpect(status().isConflict());
     }
 
     @Test

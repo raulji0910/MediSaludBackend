@@ -1,5 +1,6 @@
 package com.ceiba.medisalud.cita;
 
+import com.ceiba.medisalud.cita.dto.CancelacionResponse;
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
 import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
@@ -14,6 +15,7 @@ import com.ceiba.medisalud.shared.exception.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,6 +33,7 @@ class CitaServiceImpl implements CitaService {
 
     private static final int DIAS_VENTANA_PENALIZACION = 30;
     private static final int MAX_PENALIZACIONES_PERMITIDAS = 3;
+    private static final int HORAS_MINIMAS_ANTES_DE_CANCELAR_SIN_PENALIZACION = 2;
 
     private final CitaRepository citaRepository;
     private final PacienteRepository pacienteRepository;
@@ -106,6 +109,34 @@ class CitaServiceImpl implements CitaService {
 
         return new DisponibilidadResponse(medico.getId(), medico.getNombreCompleto(), medico.getEspecialidad(),
                 fechaInicio, fechaFin, franjasDisponibles);
+    }
+
+    @Override
+    public CancelacionResponse cancelar(UUID id) {
+        Cita cita = obtenerEntidadPorId(id);
+        if (cita.getEstado() != EstadoCita.PROGRAMADA) {
+            throw new ConflictException("Solo se pueden cancelar citas en estado PROGRAMADA");
+        }
+
+        boolean penalizacionRegistrada = esCancelacionTardia(cita.getFechaHora());
+        if (penalizacionRegistrada) {
+            Penalizacion penalizacion = new Penalizacion(cita.getPaciente(), cita.getId(),
+                    "Cancelacion con menos de " + HORAS_MINIMAS_ANTES_DE_CANCELAR_SIN_PENALIZACION
+                            + " horas de antelacion");
+            penalizacionRepository.save(penalizacion);
+        }
+
+        cita.setEstado(EstadoCita.CANCELADA);
+        cita.setFechaCancelacion(Instant.now());
+        Cita guardada = citaRepository.save(cita);
+
+        return new CancelacionResponse(guardada.getId(), guardada.getEstado(), guardada.getFechaCancelacion(),
+                penalizacionRegistrada);
+    }
+
+    private boolean esCancelacionTardia(LocalDateTime fechaHoraCita) {
+        Duration antelacion = Duration.between(LocalDateTime.now(), fechaHoraCita);
+        return antelacion.toMinutes() < HORAS_MINIMAS_ANTES_DE_CANCELAR_SIN_PENALIZACION * 60L;
     }
 
     Cita obtenerEntidadPorId(UUID id) {

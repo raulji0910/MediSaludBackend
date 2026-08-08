@@ -1,5 +1,6 @@
 package com.ceiba.medisalud.cita;
 
+import com.ceiba.medisalud.cita.dto.CancelacionResponse;
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
 import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,6 +44,12 @@ class CitaController {
     @Operation(summary = "Consultar una cita por id")
     public ResponseEntity<CitaResponse> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(citaService.buscarPorId(id));
+    }
+
+    @PutMapping("/{id}/cancelar")
+    @Operation(summary = "Cancelar una cita programada")
+    public ResponseEntity<CancelacionResponse> cancelar(@PathVariable UUID id) {
+        return ResponseEntity.ok(citaService.cancelar(id));
     }
 
     @GetMapping("/disponibilidad")
