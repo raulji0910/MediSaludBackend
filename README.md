@@ -20,6 +20,7 @@ MVP backend para digitalizar el agendamiento de citas de la clínica MediSalud: 
   - [Listado de citas (RF-06)](#listado-de-citas-rf-06)
 - [Reglas de negocio implementadas](#reglas-de-negocio-implementadas)
 - [Configuración de reglas de negocio](#configuración-de-reglas-de-negocio)
+- [Despliegue en la nube](#despliegue-en-la-nube)
 
 ## Tecnologías utilizadas
 
@@ -707,3 +708,25 @@ medisalud:
 ```
 
 **Por qué así y no en una tabla de la base de datos:** estos valores representan la *política* de la clínica (duración de la franja, horario de atención, cuántas penalizaciones tolerar) — cambian con poca frecuencia, no varias veces al día. Una tabla de `settings` editable en caliente sin reiniciar la app sería más flexible, pero agrega complejidad real que nadie pidió: caché con invalidación, y probablemente un endpoint de administración que no existe (no hay autenticación ni panel admin en el alcance de este MVP). `application.yml` es la solución proporcionada al problema: cambiar cualquiera de estos valores es editar el archivo (o sobreescribirlo con una variable de entorno / `application-prod.yml` por ambiente) y reiniciar — sin tocar una sola línea de `CitaServiceImpl` ni de sus tests.
+
+## Despliegue en la nube
+
+La API está desplegada en una instancia AWS Lightsail (Ubuntu 22.04) que ya aloja otro proyecto en producción, usando **Docker** para mantener el despliegue completamente aislado, sin tocar ni un archivo del proyecto existente:
+
+- **Imagen propia** (`Dockerfile` multi-stage: build con `maven:3.9-eclipse-temurin-17`, runtime con `eclipse-temurin:17-jre-alpine`) — no requiere Java ni Maven instalados en el servidor.
+- **Red Docker propia** (`medisalud-net`), separada de la red del otro proyecto — cero contacto entre ambos a nivel de red.
+- **Puerto propio** (`8081`), distinto a los que ya usa el otro proyecto (80, 443, 4200, 8080).
+- **Carpeta propia** (`/opt/medisalud/`), separada del otro proyecto (`/opt/jimaco/`).
+
+```bash
+# En el servidor, dentro del repo clonado
+docker build -t medisalud-api:latest .
+docker network create medisalud-net
+docker run -d --name medisalud-api --network medisalud-net \
+  --restart unless-stopped -p 8081:8080 medisalud-api:latest
+```
+
+**URL pública:** `http://54.232.227.230:8081`
+**Swagger UI:** `http://54.232.227.230:8081/swagger-ui.html`
+
+> Nota: es HTTP simple (no HTTPS) para no tener que modificar la configuración de Caddy del otro proyecto, que ya gestiona el único dominio con certificado en este servidor. Para un entorno productivo real, lo siguiente sería agregar un bloque nuevo en Caddy (o un proxy propio) para exponerlo con TLS bajo un subdominio, sin tocar el bloque existente.
