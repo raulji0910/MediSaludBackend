@@ -140,6 +140,21 @@ class CitaServiceImplTest {
     }
 
     @Test
+    void reservar_debeLanzarBusinessRuleException_cuandoLaFechaDeNacimientoDelPacienteEsFutura() {
+        // RN-03: el registro de pacientes ya bloquea fechas de nacimiento futuras (@PastOrPresent),
+        // asi que esta ruta solo se ejercita si la entidad llega con el dato en un estado invalido
+        // por fuera del flujo normal de la API. Se prueba igual porque la validacion existe en el
+        // codigo y debe quedar cubierta, no solo asumida como "nunca va a pasar".
+        paciente.setFechaNacimiento(LocalDate.now().plusDays(1));
+        CitaRequest request = new CitaRequest(paciente.getId(), medico.getId(), proximoLunesValido());
+        when(pacienteRepository.findById(paciente.getId())).thenReturn(Optional.of(paciente));
+        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+
+        assertThatThrownBy(() -> citaService.reservar(request))
+                .isInstanceOf(BusinessRuleException.class);
+    }
+
+    @Test
     void reservar_debeLanzarConflictException_cuandoElMedicoYaTieneCitaEnEsaFranja() {
         LocalDateTime fechaHora = proximoLunesValido();
         CitaRequest request = new CitaRequest(paciente.getId(), medico.getId(), fechaHora);
