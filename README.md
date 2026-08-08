@@ -13,6 +13,7 @@ MVP backend para digitalizar el agendamiento de citas de la clínica MediSalud: 
   - [Médicos (RF-01)](#médicos-rf-01)
   - [Pacientes (RF-02)](#pacientes-rf-02)
   - [Citas (RF-03)](#citas-rf-03)
+  - [Disponibilidad (RF-04)](#disponibilidad-rf-04)
 - [Reglas de negocio implementadas](#reglas-de-negocio-implementadas)
 
 ## Tecnologías utilizadas
@@ -409,11 +410,59 @@ Content-Type: application/json
 
 **Response — 200 OK**: igual estructura que el objeto anterior. **404 Not Found** si no existe.
 
+---
+
+### Disponibilidad (RF-04)
+
+Consulta las franjas de 30 minutos disponibles de un médico en un rango de fechas. Reutiliza `HorarioAtencionPolicy` (la misma política de RN-01 que usa RF-03 al reservar) y descarta tanto las franjas ya ocupadas por una cita `PROGRAMADA` como las que ya pasaron.
+
+#### `GET /api/citas/disponibilidad` — Consultar franjas disponibles
+
+**Request**
+
+```http
+GET /api/citas/disponibilidad?medicoId=a1a1a1a1-0001-4000-8000-000000000001&fechaInicio=2026-08-10&fechaFin=2026-08-10
+```
+
+**Response — 200 OK**
+
+```json
+{
+  "medicoId": "a1a1a1a1-0001-4000-8000-000000000001",
+  "medicoNombre": "Dra. Maria Gonzalez",
+  "medicoEspecialidad": "Cardiologia",
+  "fechaInicio": "2026-08-10",
+  "fechaFin": "2026-08-10",
+  "franjasDisponibles": [
+    { "horaInicio": "2026-08-10T08:00:00", "horaFin": "2026-08-10T08:30:00" },
+    { "horaInicio": "2026-08-10T08:30:00", "horaFin": "2026-08-10T09:00:00" },
+    { "horaInicio": "2026-08-10T09:30:00", "horaFin": "2026-08-10T10:00:00" }
+  ]
+}
+```
+
+*(en este ejemplo la franja `09:00-09:30` no aparece porque ya está reservada)*
+
+**Response — 400 Bad Request** (falta un parámetro obligatorio, o `fechaFin` es anterior a `fechaInicio`)
+
+```json
+{
+  "timestamp": "2026-08-08T19:08:35.645099400Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Falta el parametro obligatorio 'medicoId'",
+  "path": "/api/citas/disponibilidad",
+  "validationErrors": null
+}
+```
+
+**Response — 404 Not Found**: si `medicoId` no existe.
+
 ## Reglas de negocio implementadas
 
 | Regla | Estado | Dónde se aplica |
 |---|---|---|
-| RN-01 — Franjas de 30 min, horario laboral (L-V 08-18, Sáb 08-13, sin domingos/festivos) | ✅ | `HorarioAtencionPolicy`, al reservar (RF-03) |
+| RN-01 — Franjas de 30 min, horario laboral (L-V 08-18, Sáb 08-13, sin domingos/festivos) | ✅ | `HorarioAtencionPolicy`, al reservar (RF-03) y al consultar disponibilidad (RF-04) |
 | RN-02 — Un médico no puede tener dos citas en la misma franja | ✅ | `CitaService.reservar` → `409` |
 | RN-03 — Edad mínima 0 años, sin fechas de nacimiento futuras | ✅ | Validado en el registro del paciente (RF-02) y defensivamente al reservar |
 | RN-04 — Un paciente no puede tener dos citas en la misma franja, sin importar el médico (conflicto global de agenda) | ✅ | `CitaService.reservar` → `409` |
@@ -421,4 +470,4 @@ Content-Type: application/json
 | RN-05 (parte 2) — Registrar la penalización al cancelar con menos de 2h de antelación | ⏳ Pendiente | Se implementa junto con RF-05 (Cancelación) |
 | RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Depende de RF-05 |
 
-*La sección de Citas se seguirá ampliando con RF-04 (disponibilidad), RF-05 (cancelación) y RF-06 (listado con filtros).*
+*La sección de Citas se seguirá ampliando con RF-05 (cancelación) y RF-06 (listado con filtros).*

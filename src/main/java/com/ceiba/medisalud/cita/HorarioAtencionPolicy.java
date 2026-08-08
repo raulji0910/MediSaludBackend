@@ -6,14 +6,17 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Component
 public class HorarioAtencionPolicy {
 
+    public static final int DURACION_FRANJA_MINUTOS = 30;
+
     private static final LocalTime APERTURA = LocalTime.of(8, 0);
     private static final LocalTime CIERRE_ENTRE_SEMANA = LocalTime.of(18, 0);
     private static final LocalTime CIERRE_SABADO = LocalTime.of(13, 0);
-    private static final int DURACION_FRANJA_MINUTOS = 30;
 
     private final HolidayPolicy holidayPolicy;
 
@@ -22,19 +25,24 @@ public class HorarioAtencionPolicy {
     }
 
     public boolean esFranjaValida(LocalDateTime fechaHora) {
-        if (fechaHora.getSecond() != 0 || fechaHora.getNano() != 0
-                || fechaHora.getMinute() % DURACION_FRANJA_MINUTOS != 0) {
+        if (fechaHora.getSecond() != 0 || fechaHora.getNano() != 0) {
             return false;
         }
+        return franjasDelDia(fechaHora.toLocalDate()).contains(fechaHora.toLocalTime());
+    }
 
-        LocalDate fecha = fechaHora.toLocalDate();
+    public List<LocalTime> franjasDelDia(LocalDate fecha) {
         DayOfWeek dia = fecha.getDayOfWeek();
         if (dia == DayOfWeek.SUNDAY || holidayPolicy.esFestivo(fecha)) {
-            return false;
+            return List.of();
         }
 
         LocalTime cierre = dia == DayOfWeek.SATURDAY ? CIERRE_SABADO : CIERRE_ENTRE_SEMANA;
-        LocalTime hora = fechaHora.toLocalTime();
-        return !hora.isBefore(APERTURA) && !hora.plusMinutes(DURACION_FRANJA_MINUTOS).isAfter(cierre);
+        List<LocalTime> franjas = new ArrayList<>();
+        for (LocalTime hora = APERTURA; !hora.plusMinutes(DURACION_FRANJA_MINUTOS).isAfter(cierre);
+                hora = hora.plusMinutes(DURACION_FRANJA_MINUTOS)) {
+            franjas.add(hora);
+        }
+        return franjas;
     }
 }

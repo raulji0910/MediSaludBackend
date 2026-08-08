@@ -72,4 +72,34 @@ class HorarioAtencionPolicyTest {
 
         assertThat(policyConFestivos.esFranjaValida(LocalDateTime.of(LUNES, LocalTime.of(9, 0)))).isFalse();
     }
+
+    @Test
+    void franjasDelDia_debeRetornar20Franjas_enUnDiaEntreSemana() {
+        assertThat(policy.franjasDelDia(LUNES))
+                .hasSize(20)
+                .startsWith(LocalTime.of(8, 0))
+                .endsWith(LocalTime.of(17, 30));
+    }
+
+    @Test
+    void franjasDelDia_debeRetornar10Franjas_enSabado() {
+        assertThat(policy.franjasDelDia(SABADO))
+                .hasSize(10)
+                .startsWith(LocalTime.of(8, 0))
+                .endsWith(LocalTime.of(12, 30));
+    }
+
+    @Test
+    void franjasDelDia_debeRetornarVacio_enDomingo() {
+        assertThat(policy.franjasDelDia(DOMINGO)).isEmpty();
+    }
+
+    @Test
+    void franjasDelDia_debeRetornarVacio_cuandoElDiaEsFestivo() {
+        HolidayPolicy festivos = mock(HolidayPolicy.class);
+        when(festivos.esFestivo(any())).thenReturn(true);
+        HorarioAtencionPolicy policyConFestivos = new HorarioAtencionPolicy(festivos);
+
+        assertThat(policyConFestivos.franjasDelDia(LUNES)).isEmpty();
+    }
 }

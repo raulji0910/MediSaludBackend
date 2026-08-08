@@ -2,6 +2,7 @@ package com.ceiba.medisalud.cita;
 
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
+import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
 import com.ceiba.medisalud.medico.Medico;
 import com.ceiba.medisalud.medico.MedicoRepository;
 import com.ceiba.medisalud.paciente.Paciente;
@@ -16,9 +17,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.TemporalAdjusters;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -167,6 +170,58 @@ class CitaServiceImplTest {
 
         assertThatThrownBy(() -> citaService.reservar(request))
                 .isInstanceOf(BusinessRuleException.class);
+    }
+
+    @Test
+    void consultarDisponibilidad_debeLanzarResourceNotFoundException_cuandoElMedicoNoExiste() {
+        UUID medicoIdInexistente = UUID.randomUUID();
+        LocalDate fecha = proximoLunesValido().toLocalDate();
+        when(medicoRepository.findById(medicoIdInexistente)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> citaService.consultarDisponibilidad(medicoIdInexistente, fecha, fecha))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void consultarDisponibilidad_debeLanzarBusinessRuleException_cuandoFechaFinEsAnteriorAFechaInicio() {
+        LocalDate fecha = proximoLunesValido().toLocalDate();
+        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+
+        assertThatThrownBy(() -> citaService.consultarDisponibilidad(medico.getId(), fecha, fecha.minusDays(1)))
+                .isInstanceOf(BusinessRuleException.class);
+    }
+
+    @Test
+    void consultarDisponibilidad_debeExcluirLaFranjaYaOcupadaPorUnaCita() {
+        LocalDate lunes = proximoLunesValido().toLocalDate();
+        LocalDateTime franjaOcupada = LocalDateTime.of(lunes, LocalTime.of(9, 0));
+        Cita citaExistente = new Cita(paciente, medico, franjaOcupada);
+        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        when(citaRepository.findByMedicoIdAndEstadoAndFechaHoraBetween(eq(medico.getId()), eq(EstadoCita.PROGRAMADA),
+                any(), any())).thenReturn(List.of(citaExistente));
+
+        DisponibilidadResponse response = citaService.consultarDisponibilidad(medico.getId(), lunes, lunes);
+
+        assertThat(response.franjasDisponibles())
+                .extracting(f -> f.horaInicio())
+                .doesNotContain(franjaOcupada)
+                .contains(franjaOcupada.plusMinutes(30));
+    }
+
+    @Test
+    void consultarDisponibilidad_debeRetornar110Franjas_enUnaSemanaCompletaSinCitasOcupadas() {
+        LocalDate lunes = proximoLunesValido().toLocalDate();
+        LocalDate domingo = lunes.plusDays(6);
+        when(medicoRepository.findById(medico.getId())).thenReturn(Optional.of(medico));
+        when(citaRepository.findByMedicoIdAndEstadoAndFechaHoraBetween(eq(medico.getId()), eq(EstadoCita.PROGRAMADA),
+                any(), any())).thenReturn(List.of());
+
+        DisponibilidadResponse response = citaService.consultarDisponibilidad(medico.getId(), lunes, domingo);
+
+        assertThat(response.franjasDisponibles()).hasSize(110);
+        assertThat(response.franjasDisponibles())
+                .extracting(f -> f.horaInicio().toLocalDate().getDayOfWeek())
+                .doesNotContain(DayOfWeek.SUNDAY);
     }
 
     @Test

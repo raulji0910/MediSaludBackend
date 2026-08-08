@@ -2,6 +2,8 @@ package com.ceiba.medisalud.cita;
 
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
+import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
+import com.ceiba.medisalud.cita.dto.FranjaDisponibleResponse;
 import com.ceiba.medisalud.shared.exception.BusinessRuleException;
 import com.ceiba.medisalud.shared.exception.ConflictException;
 import com.ceiba.medisalud.shared.exception.ResourceNotFoundException;
@@ -13,7 +15,9 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -124,5 +128,48 @@ class CitaControllerTest {
 
         mockMvc.perform(get("/api/citas/{id}", id))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void consultarDisponibilidad_debeRetornar200_conLasFranjasDisponibles() throws Exception {
+        UUID medicoId = UUID.randomUUID();
+        LocalDate fecha = LocalDate.of(2026, 8, 10);
+        DisponibilidadResponse response = new DisponibilidadResponse(medicoId, "Dra. Maria Gonzalez", "Cardiologia",
+                fecha, fecha, List.of(new FranjaDisponibleResponse(
+                        LocalDateTime.of(fecha, java.time.LocalTime.of(9, 0)),
+                        LocalDateTime.of(fecha, java.time.LocalTime.of(9, 30)))));
+        when(citaService.consultarDisponibilidad(medicoId, fecha, fecha)).thenReturn(response);
+
+        mockMvc.perform(get("/api/citas/disponibilidad")
+                        .param("medicoId", medicoId.toString())
+                        .param("fechaInicio", fecha.toString())
+                        .param("fechaFin", fecha.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.franjasDisponibles[0].horaInicio").value("2026-08-10T09:00:00"));
+    }
+
+    @Test
+    void consultarDisponibilidad_debeRetornar404_cuandoElMedicoNoExiste() throws Exception {
+        UUID medicoId = UUID.randomUUID();
+        LocalDate fecha = LocalDate.of(2026, 8, 10);
+        when(citaService.consultarDisponibilidad(medicoId, fecha, fecha))
+                .thenThrow(new ResourceNotFoundException("No existe un medico con id " + medicoId));
+
+        mockMvc.perform(get("/api/citas/disponibilidad")
+                        .param("medicoId", medicoId.toString())
+                        .param("fechaInicio", fecha.toString())
+                        .param("fechaFin", fecha.toString()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void consultarDisponibilidad_debeRetornar400_cuandoFaltaElParametroMedicoId() throws Exception {
+        LocalDate fecha = LocalDate.of(2026, 8, 10);
+
+        mockMvc.perform(get("/api/citas/disponibilidad")
+                        .param("fechaInicio", fecha.toString())
+                        .param("fechaFin", fecha.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Falta el parametro obligatorio 'medicoId'"));
     }
 }
