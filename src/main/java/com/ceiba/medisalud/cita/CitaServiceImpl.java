@@ -12,6 +12,8 @@ import com.ceiba.medisalud.paciente.PacienteRepository;
 import com.ceiba.medisalud.shared.exception.BusinessRuleException;
 import com.ceiba.medisalud.shared.exception.ConflictException;
 import com.ceiba.medisalud.shared.exception.ResourceNotFoundException;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -132,6 +134,28 @@ class CitaServiceImpl implements CitaService {
 
         return new CancelacionResponse(guardada.getId(), guardada.getEstado(), guardada.getFechaCancelacion(),
                 penalizacionRegistrada);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CitaResponse> listar(UUID medicoId, UUID pacienteId, EstadoCita estado,
+                                      LocalDate fechaInicio, LocalDate fechaFin) {
+        if (fechaInicio != null && fechaFin != null && fechaFin.isBefore(fechaInicio)) {
+            throw new BusinessRuleException("La fecha fin no puede ser anterior a la fecha inicio");
+        }
+
+        LocalDateTime desde = fechaInicio == null ? null : fechaInicio.atStartOfDay();
+        LocalDateTime hasta = fechaFin == null ? null : fechaFin.plusDays(1).atStartOfDay();
+
+        Specification<Cita> filtro = Specification.where(CitaSpecifications.conMedicoId(medicoId))
+                .and(CitaSpecifications.conPacienteId(pacienteId))
+                .and(CitaSpecifications.conEstado(estado))
+                .and(CitaSpecifications.conFechaHoraDesde(desde))
+                .and(CitaSpecifications.conFechaHoraHasta(hasta));
+
+        return citaRepository.findAll(filtro, Sort.by(Sort.Direction.ASC, "fechaHora")).stream()
+                .map(citaMapper::toResponse)
+                .toList();
     }
 
     private boolean esCancelacionTardia(LocalDateTime fechaHoraCita) {

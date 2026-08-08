@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -44,6 +45,17 @@ class CitaController {
     @Operation(summary = "Consultar una cita por id")
     public ResponseEntity<CitaResponse> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(citaService.buscarPorId(id));
+    }
+
+    @GetMapping
+    @Operation(summary = "Listar citas con filtros opcionales (medico, paciente, estado, rango de fechas)")
+    public ResponseEntity<List<CitaResponse>> listar(
+            @RequestParam(required = false) UUID medicoId,
+            @RequestParam(required = false) UUID pacienteId,
+            @RequestParam(required = false) EstadoCita estado,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaInicio,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaFin) {
+        return ResponseEntity.ok(citaService.listar(medicoId, pacienteId, estado, fechaInicio, fechaFin));
     }
 
     @PutMapping("/{id}/cancelar")

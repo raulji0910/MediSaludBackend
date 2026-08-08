@@ -164,6 +164,44 @@ class CitaControllerTest {
     }
 
     @Test
+    void listar_debeRetornar200_conLaListaDeCitasFiltradas() throws Exception {
+        UUID medicoId = UUID.randomUUID();
+        CitaResponse response = new CitaResponse(UUID.randomUUID(), UUID.randomUUID(), "Juan Perez", medicoId,
+                "Dra. Maria Gonzalez", "Cardiologia", LocalDateTime.of(2026, 8, 10, 9, 0),
+                EstadoCita.PROGRAMADA, null, Instant.now());
+        when(citaService.listar(medicoId, null, EstadoCita.PROGRAMADA, null, null))
+                .thenReturn(List.of(response));
+
+        mockMvc.perform(get("/api/citas")
+                        .param("medicoId", medicoId.toString())
+                        .param("estado", "PROGRAMADA"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].medicoId").value(medicoId.toString()));
+    }
+
+    @Test
+    void listar_debeRetornar200_conListaVacia_cuandoNoHayFiltros() throws Exception {
+        when(citaService.listar(null, null, null, null, null)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/citas"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    void listar_debeRetornar400_cuandoFechaFinEsAnteriorAFechaInicio() throws Exception {
+        LocalDate inicio = LocalDate.of(2026, 8, 10);
+        LocalDate fin = LocalDate.of(2026, 8, 5);
+        when(citaService.listar(null, null, null, inicio, fin))
+                .thenThrow(new BusinessRuleException("La fecha fin no puede ser anterior a la fecha inicio"));
+
+        mockMvc.perform(get("/api/citas")
+                        .param("fechaInicio", inicio.toString())
+                        .param("fechaFin", fin.toString()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void consultarDisponibilidad_debeRetornar200_conLasFranjasDisponibles() throws Exception {
         UUID medicoId = UUID.randomUUID();
         LocalDate fecha = LocalDate.of(2026, 8, 10);

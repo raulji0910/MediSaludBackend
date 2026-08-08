@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -284,6 +286,26 @@ class CitaServiceImplTest {
 
         assertThatThrownBy(() -> citaService.cancelar(cita.getId()))
                 .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void listar_debeLanzarBusinessRuleException_cuandoFechaFinEsAnteriorAFechaInicio() {
+        LocalDate fecha = LocalDate.now();
+
+        assertThatThrownBy(() -> citaService.listar(null, null, null, fecha, fecha.minusDays(1)))
+                .isInstanceOf(BusinessRuleException.class);
+    }
+
+    @Test
+    void listar_debeMapearLasCitasEncontradasPorElRepositorio() {
+        Cita cita = new Cita(paciente, medico, LocalDateTime.now().plusDays(1));
+        when(citaRepository.findAll(any(Specification.class), any(Sort.class)))
+                .thenReturn(List.of(cita));
+
+        List<CitaResponse> resultado = citaService.listar(medico.getId(), null, null, null, null);
+
+        assertThat(resultado).hasSize(1);
+        assertThat(resultado.get(0).medicoId()).isEqualTo(medico.getId());
     }
 
     @Test

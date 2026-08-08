@@ -15,6 +15,7 @@ MVP backend para digitalizar el agendamiento de citas de la clínica MediSalud: 
   - [Citas (RF-03)](#citas-rf-03)
   - [Disponibilidad (RF-04)](#disponibilidad-rf-04)
   - [Cancelación (RF-05)](#cancelación-rf-05)
+  - [Listado de citas (RF-06)](#listado-de-citas-rf-06)
 - [Reglas de negocio implementadas](#reglas-de-negocio-implementadas)
 
 ## Tecnologías utilizadas
@@ -71,6 +72,7 @@ com.ceiba.medisalud
 - **Validaciones reutilizables** (`shared/validation`): reglas de formato que se repiten entre dominios (ej. "teléfono con mínimo 7 dígitos", requerido tanto en RF-01 como en RF-02) se implementan una sola vez como anotación custom de Bean Validation (`@PhoneNumber`), evitando duplicar lógica (DRY).
 - **`HolidayPolicy` como punto de extensión (OCP)**: el enunciado exige que no haya atención en "domingos y festivos" pero no entrega un calendario de festivos. En vez de dejarlo sin resolver o inventar fechas, se modeló como una interfaz consumida por `HorarioAtencionPolicy`; la implementación por defecto (`SinFestivosConfiguradosPolicy`) no marca ningún día como festivo. Conectar el calendario real de festivos colombianos el día de mañana es agregar una implementación nueva, sin tocar la lógica de horarios.
 - **Límite conocido de RN-02/RN-04 bajo concurrencia**: a diferencia de la unicidad del documento del paciente (que sí tiene un constraint único en base de datos), la no-duplicidad de citas por médico/paciente en una misma franja se valida a nivel de servicio dentro de la transacción, porque la condición depende del `estado` de la cita (`PROGRAMADA`), no de una combinación de columnas siempre única — un índice único parcial no es portable entre motores de base de datos de forma sencilla. Es una limitación aceptada y documentada para el alcance de este MVP.
+- **`CitaSpecifications` (patrón Specification) para RF-06**: el listado de citas tiene 4 filtros opcionales combinables entre sí (médico, paciente, estado, rango de fechas). En vez de un método de repositorio con banderas nulas y una cadena de `if` armando SQL a mano, cada filtro es una `Specification<Cita>` independiente que se compone con `.and(...)` solo si el parámetro fue enviado. Agregar un filtro nuevo en el futuro es sumar una `Specification` más, sin tocar las que ya existen (OCP) — y cada una se puede probar por separado.
 
 ## Ejecución local
 
@@ -499,6 +501,55 @@ PUT /api/citas/5c415597-ecd7-4928-8f81-ab7ddc3ecdc7/cancelar
 }
 ```
 
+---
+
+### Listado de citas (RF-06)
+
+Lista citas con 4 filtros opcionales y combinables entre sí: `medicoId`, `pacienteId`, `estado` (`PROGRAMADA`, `CANCELADA`, `ATENDIDA`) y rango de fechas (`fechaInicio`, `fechaFin`). Sin filtros, devuelve todas las citas ordenadas por fecha.
+
+#### `GET /api/citas` — Listar citas
+
+**Request** (ejemplo: citas de un médico específico)
+
+```http
+GET /api/citas?medicoId=a1a1a1a1-0001-4000-8000-000000000001
+```
+
+**Response — 200 OK**
+
+```json
+[
+  {
+    "id": "a15639ae-65ab-4222-b901-69b6e46fff0d",
+    "pacienteId": "e0e98fef-3eb8-46ed-9626-a39bb075b405",
+    "pacienteNombre": "Marta Salas",
+    "medicoId": "a1a1a1a1-0001-4000-8000-000000000001",
+    "medicoNombre": "Dra. Maria Gonzalez",
+    "medicoEspecialidad": "Cardiologia",
+    "fechaHora": "2026-08-10T08:00:00",
+    "estado": "CANCELADA",
+    "fechaCancelacion": "2026-08-08T21:35:28.178601Z",
+    "creadoEn": "2026-08-08T21:35:27.617602Z"
+  },
+  {
+    "id": "07834953-4de9-4558-b87c-3bc5ab65fa55",
+    "pacienteId": "ef998532-ffb9-44d7-82a3-1fd5ff62b7a7",
+    "pacienteNombre": "Nestor Ibarra",
+    "medicoId": "a1a1a1a1-0001-4000-8000-000000000001",
+    "medicoNombre": "Dra. Maria Gonzalez",
+    "medicoEspecialidad": "Cardiologia",
+    "fechaHora": "2026-08-10T08:30:00",
+    "estado": "PROGRAMADA",
+    "fechaCancelacion": null,
+    "creadoEn": "2026-08-08T21:35:27.926032Z"
+  }
+]
+```
+
+Otros ejemplos válidos: `GET /api/citas?estado=CANCELADA`, `GET /api/citas?pacienteId=...&fechaInicio=2026-08-01&fechaFin=2026-08-31`, o combinando los 4 filtros a la vez.
+
+**Response — 400 Bad Request**: si `fechaFin` es anterior a `fechaInicio`.
+
 ## Reglas de negocio implementadas
 
 | Regla | Estado | Dónde se aplica |
@@ -509,6 +560,6 @@ PUT /api/citas/5c415597-ecd7-4928-8f81-ab7ddc3ecdc7/cancelar
 | RN-04 — Un paciente no puede tener dos citas en la misma franja, sin importar el médico (conflicto global de agenda) | ✅ | `CitaService.reservar` → `409` |
 | RN-05 (parte 1) — Bloquear el agendamiento si el paciente tiene 3+ penalizaciones en 30 días | ✅ | `CitaService.reservar` → `400` |
 | RN-05 (parte 2) — Registrar la penalización al cancelar con menos de 2h de antelación | ✅ | `CitaService.cancelar` → `PUT /api/citas/{id}/cancelar` |
-| RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Depende de RF-05 (ya completo) — se implementa a continuación |
+| RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Se implementa a continuación |
 
-*La sección de Citas se seguirá ampliando con RF-06 (listado con filtros) y RN-06 (reprogramación).*
+*La sección de Citas se seguirá ampliando con RN-06 (reprogramación).*

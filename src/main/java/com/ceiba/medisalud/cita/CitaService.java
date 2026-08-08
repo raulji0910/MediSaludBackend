@@ -6,6 +6,7 @@ import com.ceiba.medisalud.cita.dto.CitaResponse;
 import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public interface CitaService {
@@ -17,4 +18,7 @@ public interface CitaService {
     DisponibilidadResponse consultarDisponibilidad(UUID medicoId, LocalDate fechaInicio, LocalDate fechaFin);
 
     CancelacionResponse cancelar(UUID id);
+
+    List<CitaResponse> listar(UUID medicoId, UUID pacienteId, EstadoCita estado,
+                               LocalDate fechaInicio, LocalDate fechaFin);
 }

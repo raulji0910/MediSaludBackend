@@ -1,12 +1,13 @@
 package com.ceiba.medisalud.cita;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-public interface CitaRepository extends JpaRepository<Cita, UUID> {
+public interface CitaRepository extends JpaRepository<Cita, UUID>, JpaSpecificationExecutor<Cita> {
 
     boolean existsByMedicoIdAndFechaHoraAndEstado(UUID medicoId, LocalDateTime fechaHora, EstadoCita estado);
 
