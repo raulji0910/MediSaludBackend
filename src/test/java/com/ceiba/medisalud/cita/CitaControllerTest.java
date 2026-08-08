@@ -164,6 +164,38 @@ class CitaControllerTest {
     }
 
     @Test
+    void atender_debeRetornar200_conElEstadoAtendida() throws Exception {
+        UUID id = UUID.randomUUID();
+        CitaResponse response = new CitaResponse(id, UUID.randomUUID(), "Juan Perez", UUID.randomUUID(),
+                "Dra. Maria Gonzalez", "Cardiologia", LocalDateTime.of(2026, 8, 10, 9, 0),
+                EstadoCita.ATENDIDA, null, Instant.now());
+        when(citaService.atender(id)).thenReturn(response);
+
+        mockMvc.perform(put("/api/citas/{id}/atender", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.estado").value("ATENDIDA"));
+    }
+
+    @Test
+    void atender_debeRetornar404_cuandoLaCitaNoExiste() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(citaService.atender(id)).thenThrow(new ResourceNotFoundException("No existe una cita con id " + id));
+
+        mockMvc.perform(put("/api/citas/{id}/atender", id))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void atender_debeRetornar409_cuandoLaCitaNoEstaProgramada() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(citaService.atender(id))
+                .thenThrow(new ConflictException("Solo se pueden marcar como atendidas citas en estado PROGRAMADA"));
+
+        mockMvc.perform(put("/api/citas/{id}/atender", id))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
     void listar_debeRetornar200_conLaListaDeCitasFiltradas() throws Exception {
         UUID medicoId = UUID.randomUUID();
         CitaResponse response = new CitaResponse(UUID.randomUUID(), UUID.randomUUID(), "Juan Perez", medicoId,

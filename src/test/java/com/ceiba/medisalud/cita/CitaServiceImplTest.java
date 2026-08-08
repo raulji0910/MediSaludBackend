@@ -289,6 +289,46 @@ class CitaServiceImplTest {
     }
 
     @Test
+    void atender_debeCambiarEstadoAAtendida_cuandoLaCitaEstaProgramada() {
+        Cita cita = new Cita(paciente, medico, LocalDateTime.now().plusDays(1));
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CitaResponse response = citaService.atender(cita.getId());
+
+        assertThat(response.estado()).isEqualTo(EstadoCita.ATENDIDA);
+    }
+
+    @Test
+    void atender_debeLanzarResourceNotFoundException_cuandoLaCitaNoExiste() {
+        UUID idInexistente = UUID.randomUUID();
+        when(citaRepository.findById(idInexistente)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> citaService.atender(idInexistente))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void atender_debeLanzarConflictException_cuandoLaCitaYaFueCancelada() {
+        Cita cita = new Cita(paciente, medico, LocalDateTime.now().plusDays(1));
+        cita.setEstado(EstadoCita.CANCELADA);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+
+        assertThatThrownBy(() -> citaService.atender(cita.getId()))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void atender_debeLanzarConflictException_cuandoLaCitaYaFueAtendida() {
+        Cita cita = new Cita(paciente, medico, LocalDateTime.now().plusDays(1));
+        cita.setEstado(EstadoCita.ATENDIDA);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+
+        assertThatThrownBy(() -> citaService.atender(cita.getId()))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
     void listar_debeLanzarBusinessRuleException_cuandoFechaFinEsAnteriorAFechaInicio() {
         LocalDate fecha = LocalDate.now();
 

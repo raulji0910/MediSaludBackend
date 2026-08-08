@@ -64,6 +64,13 @@ class CitaController {
         return ResponseEntity.ok(citaService.cancelar(id));
     }
 
+    @PutMapping("/{id}/atender")
+    @Operation(summary = "Marcar una cita programada como atendida (no forma parte del enunciado original; "
+            + "se agrego para que el estado ATENDIDA, ya usado como filtro en RF-06, sea alcanzable)")
+    public ResponseEntity<CitaResponse> atender(@PathVariable UUID id) {
+        return ResponseEntity.ok(citaService.atender(id));
+    }
+
     @GetMapping("/disponibilidad")
     @Operation(summary = "Consultar las franjas horarias disponibles de un medico en un rango de fechas")
     public ResponseEntity<DisponibilidadResponse> consultarDisponibilidad(

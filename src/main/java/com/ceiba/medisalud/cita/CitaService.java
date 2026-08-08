@@ -19,6 +19,8 @@ public interface CitaService {
 
     CancelacionResponse cancelar(UUID id);
 
+    CitaResponse atender(UUID id);
+
     List<CitaResponse> listar(UUID medicoId, UUID pacienteId, EstadoCita estado,
                                LocalDate fechaInicio, LocalDate fechaFin);
 }

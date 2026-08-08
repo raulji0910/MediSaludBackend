@@ -137,6 +137,18 @@ class CitaServiceImpl implements CitaService {
     }
 
     @Override
+    public CitaResponse atender(UUID id) {
+        Cita cita = obtenerEntidadPorId(id);
+        if (cita.getEstado() != EstadoCita.PROGRAMADA) {
+            throw new ConflictException("Solo se pueden marcar como atendidas citas en estado PROGRAMADA");
+        }
+
+        cita.setEstado(EstadoCita.ATENDIDA);
+        Cita guardada = citaRepository.save(cita);
+        return citaMapper.toResponse(guardada);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public List<CitaResponse> listar(UUID medicoId, UUID pacienteId, EstadoCita estado,
                                       LocalDate fechaInicio, LocalDate fechaFin) {

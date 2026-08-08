@@ -15,6 +15,7 @@ MVP backend para digitalizar el agendamiento de citas de la clínica MediSalud: 
   - [Citas (RF-03)](#citas-rf-03)
   - [Disponibilidad (RF-04)](#disponibilidad-rf-04)
   - [Cancelación (RF-05)](#cancelación-rf-05)
+  - [Marcar cita como atendida (extra, no pedido explícitamente)](#marcar-cita-como-atendida-extra-no-pedido-explícitamente)
   - [Listado de citas (RF-06)](#listado-de-citas-rf-06)
 - [Reglas de negocio implementadas](#reglas-de-negocio-implementadas)
 
@@ -503,6 +504,52 @@ PUT /api/citas/5c415597-ecd7-4928-8f81-ab7ddc3ecdc7/cancelar
 
 ---
 
+### Marcar cita como atendida (extra, no pedido explícitamente)
+
+> **Nota de alcance:** este endpoint **no está pedido por ningún RF ni RN del enunciado**. Se agregó porque `ATENDIDA` es uno de los tres valores del estado de una cita y RF-06 explícitamente lo lista como filtro válido (`estado: PROGRAMADA, CANCELADA, ATENDIDA`) — pero sin este endpoint, `ATENDIDA` era un estado inalcanzable: se podía filtrar por él, pero ninguna operación del sistema lo producía jamás. Se agregó el endpoint simétrico a la cancelación para cerrar ese vacío, deliberadamente simple (solo valida que la cita esté `PROGRAMADA`, sin reglas de negocio adicionales, porque el enunciado no describe ninguna para esta transición).
+
+#### `PUT /api/citas/{id}/atender` — Marcar una cita como atendida
+
+**Request**: sin cuerpo, solo el id de la cita en la URL.
+
+```http
+PUT /api/citas/7b08350d-998f-4bda-927f-e47d52fda4de/atender
+```
+
+**Response — 200 OK**
+
+```json
+{
+  "id": "7b08350d-998f-4bda-927f-e47d52fda4de",
+  "pacienteId": "9909839c-2dfc-4fb2-86d7-51a7b66aa61b",
+  "pacienteNombre": "Diego Paredes",
+  "medicoId": "a1a1a1a1-0001-4000-8000-000000000001",
+  "medicoNombre": "Dra. Maria Gonzalez",
+  "medicoEspecialidad": "Cardiologia",
+  "fechaHora": "2026-08-10T11:30:00",
+  "estado": "ATENDIDA",
+  "fechaCancelacion": null,
+  "creadoEn": "2026-08-08T21:48:38.149136Z"
+}
+```
+
+**Response — 404 Not Found**: si la cita no existe.
+
+**Response — 409 Conflict**: si la cita no está en estado `PROGRAMADA`.
+
+```json
+{
+  "timestamp": "2026-08-08T21:48:38.488104600Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Solo se pueden marcar como atendidas citas en estado PROGRAMADA",
+  "path": "/api/citas/7b08350d-998f-4bda-927f-e47d52fda4de/atender",
+  "validationErrors": null
+}
+```
+
+---
+
 ### Listado de citas (RF-06)
 
 Lista citas con 4 filtros opcionales y combinables entre sí: `medicoId`, `pacienteId`, `estado` (`PROGRAMADA`, `CANCELADA`, `ATENDIDA`) y rango de fechas (`fechaInicio`, `fechaFin`). Sin filtros, devuelve todas las citas ordenadas por fecha.
@@ -563,3 +610,13 @@ Otros ejemplos válidos: `GET /api/citas?estado=CANCELADA`, `GET /api/citas?paci
 | RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Se implementa a continuación |
 
 *La sección de Citas se seguirá ampliando con RN-06 (reprogramación).*
+
+## Decisiones fuera del enunciado
+
+Estas no fueron pedidas explícitamente por ningún RF/RN, pero se agregaron con una justificación puntual documentada en cada caso:
+
+| Decisión | Por qué |
+|---|---|
+| `GET /api/pacientes/documento/{documentoIdentidad}` | Quien agenda una cita en la vida real tiene a mano el documento del paciente, no su id interno. Ver sección [Pacientes (RF-02)](#pacientes-rf-02). |
+| `PUT /api/citas/{id}/atender` | `ATENDIDA` es un estado listado como filtro válido en RF-06 pero, sin este endpoint, nunca era alcanzable. Ver sección [Marcar cita como atendida](#marcar-cita-como-atendida-extra-no-pedido-explícitamente). |
+| No agendar citas en fecha/hora pasada | Sentido común no cubierto por RN-01 a RN-06. Ver sección [Citas (RF-03)](#citas-rf-03). |
