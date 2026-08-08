@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -160,6 +161,64 @@ class CitaControllerTest {
                 .thenThrow(new ConflictException("Solo se pueden cancelar citas en estado PROGRAMADA"));
 
         mockMvc.perform(put("/api/citas/{id}/cancelar", id))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void reprogramar_debeRetornar201_conLaNuevaCita() throws Exception {
+        UUID idOriginal = UUID.randomUUID();
+        UUID idNueva = UUID.randomUUID();
+        LocalDateTime nuevaFechaHora = LocalDateTime.of(2026, 8, 17, 9, 0);
+        CitaResponse response = new CitaResponse(idNueva, UUID.randomUUID(), "Juan Perez", UUID.randomUUID(),
+                "Dra. Maria Gonzalez", "Cardiologia", nuevaFechaHora, EstadoCita.PROGRAMADA, null, Instant.now());
+        when(citaService.reprogramar(eq(idOriginal), eq(nuevaFechaHora))).thenReturn(response);
+
+        String body = """
+                {"nuevaFechaHora": "%s"}
+                """.formatted(nuevaFechaHora);
+
+        mockMvc.perform(put("/api/citas/{id}/reprogramar", idOriginal)
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(idNueva.toString()))
+                .andExpect(jsonPath("$.estado").value("PROGRAMADA"));
+    }
+
+    @Test
+    void reprogramar_debeRetornar400_cuandoFaltaLaNuevaFechaHora() throws Exception {
+        UUID id = UUID.randomUUID();
+
+        mockMvc.perform(put("/api/citas/{id}/reprogramar", id)
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.validationErrors[0].field").value("nuevaFechaHora"));
+    }
+
+    @Test
+    void reprogramar_debeRetornar404_cuandoLaCitaNoExiste() throws Exception {
+        UUID id = UUID.randomUUID();
+        LocalDateTime nuevaFechaHora = LocalDateTime.of(2026, 8, 17, 9, 0);
+        when(citaService.reprogramar(eq(id), eq(nuevaFechaHora)))
+                .thenThrow(new ResourceNotFoundException("No existe una cita con id " + id));
+
+        mockMvc.perform(put("/api/citas/{id}/reprogramar", id)
+                        .contentType("application/json")
+                        .content("{\"nuevaFechaHora\": \"" + nuevaFechaHora + "\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void reprogramar_debeRetornar409_cuandoElNuevoHorarioYaEstaOcupado() throws Exception {
+        UUID id = UUID.randomUUID();
+        LocalDateTime nuevaFechaHora = LocalDateTime.of(2026, 8, 17, 9, 0);
+        when(citaService.reprogramar(eq(id), eq(nuevaFechaHora)))
+                .thenThrow(new ConflictException("El medico ya tiene una cita programada en esa franja horaria"));
+
+        mockMvc.perform(put("/api/citas/{id}/reprogramar", id)
+                        .contentType("application/json")
+                        .content("{\"nuevaFechaHora\": \"" + nuevaFechaHora + "\"}"))
                 .andExpect(status().isConflict());
     }
 

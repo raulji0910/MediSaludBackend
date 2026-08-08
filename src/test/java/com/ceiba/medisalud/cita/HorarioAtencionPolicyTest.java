@@ -17,7 +17,14 @@ class HorarioAtencionPolicyTest {
     private static final LocalDate SABADO = LocalDate.of(2024, 1, 6);
     private static final LocalDate DOMINGO = LocalDate.of(2024, 1, 7);
 
-    private final HorarioAtencionPolicy policy = new HorarioAtencionPolicy(new SinFestivosConfiguradosPolicy());
+    static CitaProperties propiedadesPorDefecto() {
+        return new CitaProperties(30,
+                new CitaProperties.Horario(LocalTime.of(8, 0), LocalTime.of(18, 0), LocalTime.of(13, 0)),
+                new CitaProperties.Penalizacion(2, 30, 3));
+    }
+
+    private final HorarioAtencionPolicy policy =
+            new HorarioAtencionPolicy(new SinFestivosConfiguradosPolicy(), propiedadesPorDefecto());
 
     @Test
     void esFranjaValida_debeSerValida_alInicioDeLaJornadaEntreSemana() {
@@ -68,7 +75,7 @@ class HorarioAtencionPolicyTest {
     void esFranjaValida_debeSerInvalida_cuandoElDiaEsFestivo() {
         HolidayPolicy festivos = mock(HolidayPolicy.class);
         when(festivos.esFestivo(any())).thenReturn(true);
-        HorarioAtencionPolicy policyConFestivos = new HorarioAtencionPolicy(festivos);
+        HorarioAtencionPolicy policyConFestivos = new HorarioAtencionPolicy(festivos, propiedadesPorDefecto());
 
         assertThat(policyConFestivos.esFranjaValida(LocalDateTime.of(LUNES, LocalTime.of(9, 0)))).isFalse();
     }
@@ -98,7 +105,7 @@ class HorarioAtencionPolicyTest {
     void franjasDelDia_debeRetornarVacio_cuandoElDiaEsFestivo() {
         HolidayPolicy festivos = mock(HolidayPolicy.class);
         when(festivos.esFestivo(any())).thenReturn(true);
-        HorarioAtencionPolicy policyConFestivos = new HorarioAtencionPolicy(festivos);
+        HorarioAtencionPolicy policyConFestivos = new HorarioAtencionPolicy(festivos, propiedadesPorDefecto());
 
         assertThat(policyConFestivos.franjasDelDia(LUNES)).isEmpty();
     }

@@ -33,26 +33,25 @@ import java.util.stream.Collectors;
 @Transactional
 class CitaServiceImpl implements CitaService {
 
-    private static final int DIAS_VENTANA_PENALIZACION = 30;
-    private static final int MAX_PENALIZACIONES_PERMITIDAS = 3;
-    private static final int HORAS_MINIMAS_ANTES_DE_CANCELAR_SIN_PENALIZACION = 2;
-
     private final CitaRepository citaRepository;
     private final PacienteRepository pacienteRepository;
     private final MedicoRepository medicoRepository;
     private final PenalizacionRepository penalizacionRepository;
     private final HorarioAtencionPolicy horarioAtencionPolicy;
     private final CitaMapper citaMapper;
+    private final CitaProperties citaProperties;
 
     CitaServiceImpl(CitaRepository citaRepository, PacienteRepository pacienteRepository,
                      MedicoRepository medicoRepository, PenalizacionRepository penalizacionRepository,
-                     HorarioAtencionPolicy horarioAtencionPolicy, CitaMapper citaMapper) {
+                     HorarioAtencionPolicy horarioAtencionPolicy, CitaMapper citaMapper,
+                     CitaProperties citaProperties) {
         this.citaRepository = citaRepository;
         this.pacienteRepository = pacienteRepository;
         this.medicoRepository = medicoRepository;
         this.penalizacionRepository = penalizacionRepository;
         this.horarioAtencionPolicy = horarioAtencionPolicy;
         this.citaMapper = citaMapper;
+        this.citaProperties = citaProperties;
     }
 
     @Override
@@ -104,7 +103,7 @@ class CitaServiceImpl implements CitaService {
                 LocalDateTime inicio = LocalDateTime.of(fecha, hora);
                 if (!inicio.isBefore(ahora) && !franjasOcupadas.contains(inicio)) {
                     franjasDisponibles.add(new FranjaDisponibleResponse(inicio,
-                            inicio.plusMinutes(HorarioAtencionPolicy.DURACION_FRANJA_MINUTOS)));
+                            inicio.plusMinutes(citaProperties.franjaMinutos())));
                 }
             }
         }
@@ -120,20 +119,55 @@ class CitaServiceImpl implements CitaService {
             throw new ConflictException("Solo se pueden cancelar citas en estado PROGRAMADA");
         }
 
+        boolean penalizacionRegistrada = cancelarInternamente(cita);
+
+        return new CancelacionResponse(cita.getId(), cita.getEstado(), cita.getFechaCancelacion(),
+                penalizacionRegistrada);
+    }
+
+    @Override
+    public CitaResponse reprogramar(UUID id, LocalDateTime nuevaFechaHora) {
+        Cita citaActual = obtenerEntidadPorId(id);
+        if (citaActual.getEstado() != EstadoCita.PROGRAMADA) {
+            throw new ConflictException("Solo se pueden reprogramar citas en estado PROGRAMADA");
+        }
+
+        Paciente paciente = citaActual.getPaciente();
+        Medico medico = citaActual.getMedico();
+
+        // Paso 1 (RN-06): cancelar la cita anterior, aplicando RN-05 si corresponde
+        cancelarInternamente(citaActual);
+
+        // Paso 2 y 3 (RN-06): crear la nueva cita, validando que el nuevo horario este disponible.
+        // El enunciado solo pide validar RN-02/RN-04 aqui; RN-01 (franja valida) y RN-03 (edad) se
+        // mantienen porque son invariantes estructurales de cualquier cita, no reglas de agendamiento
+        // que tenga sentido saltarse. Deliberadamente NO se vuelve a aplicar el bloqueo por 3+
+        // penalizaciones (RN-05 parte 1): el enunciado solo menciona RN-02 y RN-04 para este paso, y
+        // reprogramar no es un agendamiento nuevo sino mover uno ya existente.
+        validarFechaHoraNoPasada(nuevaFechaHora);
+        validarFranjaHoraria(nuevaFechaHora);
+        validarEdadMinima(paciente);
+        validarDisponibilidadMedico(medico.getId(), nuevaFechaHora);
+        validarDisponibilidadPaciente(paciente.getId(), nuevaFechaHora);
+
+        Cita nuevaCita = new Cita(paciente, medico, nuevaFechaHora);
+        Cita guardada = citaRepository.save(nuevaCita);
+        return citaMapper.toResponse(guardada);
+    }
+
+    private boolean cancelarInternamente(Cita cita) {
         boolean penalizacionRegistrada = esCancelacionTardia(cita.getFechaHora());
         if (penalizacionRegistrada) {
             Penalizacion penalizacion = new Penalizacion(cita.getPaciente(), cita.getId(),
-                    "Cancelacion con menos de " + HORAS_MINIMAS_ANTES_DE_CANCELAR_SIN_PENALIZACION
+                    "Cancelacion con menos de " + citaProperties.penalizacion().horasMinimasCancelacion()
                             + " horas de antelacion");
             penalizacionRepository.save(penalizacion);
         }
 
         cita.setEstado(EstadoCita.CANCELADA);
         cita.setFechaCancelacion(Instant.now());
-        Cita guardada = citaRepository.save(cita);
-
-        return new CancelacionResponse(guardada.getId(), guardada.getEstado(), guardada.getFechaCancelacion(),
-                penalizacionRegistrada);
+        citaRepository.save(cita);
+        return penalizacionRegistrada;
     }
 
     @Override
@@ -172,7 +206,7 @@ class CitaServiceImpl implements CitaService {
 
     private boolean esCancelacionTardia(LocalDateTime fechaHoraCita) {
         Duration antelacion = Duration.between(LocalDateTime.now(), fechaHoraCita);
-        return antelacion.toMinutes() < HORAS_MINIMAS_ANTES_DE_CANCELAR_SIN_PENALIZACION * 60L;
+        return antelacion.toMinutes() < citaProperties.penalizacion().horasMinimasCancelacion() * 60L;
     }
 
     Cita obtenerEntidadPorId(UUID id) {
@@ -188,8 +222,11 @@ class CitaServiceImpl implements CitaService {
 
     private void validarFranjaHoraria(LocalDateTime fechaHora) {
         if (!horarioAtencionPolicy.esFranjaValida(fechaHora)) {
-            throw new BusinessRuleException("La fecha y hora debe corresponder a una franja de 30 minutos dentro "
-                    + "del horario de atencion (lunes a viernes 08:00-18:00, sabados 08:00-13:00)");
+            CitaProperties.Horario horario = citaProperties.horario();
+            throw new BusinessRuleException("La fecha y hora debe corresponder a una franja de "
+                    + citaProperties.franjaMinutos() + " minutos dentro del horario de atencion "
+                    + "(lunes a viernes " + horario.apertura() + "-" + horario.cierreEntreSemana()
+                    + ", sabados " + horario.apertura() + "-" + horario.cierreSabado() + ")");
         }
     }
 
@@ -201,11 +238,13 @@ class CitaServiceImpl implements CitaService {
     }
 
     private void validarSinPenalizacionesActivas(Paciente paciente) {
-        Instant desde = Instant.now().minus(DIAS_VENTANA_PENALIZACION, ChronoUnit.DAYS);
+        int diasVentana = citaProperties.penalizacion().diasVentana();
+        int maxPermitidas = citaProperties.penalizacion().maxPermitidas();
+        Instant desde = Instant.now().minus(diasVentana, ChronoUnit.DAYS);
         long penalizaciones = penalizacionRepository.countByPacienteIdAndFechaPenalizacionAfter(paciente.getId(), desde);
-        if (penalizaciones >= MAX_PENALIZACIONES_PERMITIDAS) {
+        if (penalizaciones >= maxPermitidas) {
             throw new BusinessRuleException("El paciente tiene " + penalizaciones + " penalizaciones en los "
-                    + "ultimos " + DIAS_VENTANA_PENALIZACION + " dias y no puede agendar nuevas citas");
+                    + "ultimos " + diasVentana + " dias y no puede agendar nuevas citas");
         }
     }
 

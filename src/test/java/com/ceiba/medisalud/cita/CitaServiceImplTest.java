@@ -55,9 +55,11 @@ class CitaServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        HorarioAtencionPolicy horarioAtencionPolicy = new HorarioAtencionPolicy(new SinFestivosConfiguradosPolicy());
+        CitaProperties citaProperties = HorarioAtencionPolicyTest.propiedadesPorDefecto();
+        HorarioAtencionPolicy horarioAtencionPolicy =
+                new HorarioAtencionPolicy(new SinFestivosConfiguradosPolicy(), citaProperties);
         citaService = new CitaServiceImpl(citaRepository, pacienteRepository, medicoRepository,
-                penalizacionRepository, horarioAtencionPolicy, new CitaMapper());
+                penalizacionRepository, horarioAtencionPolicy, new CitaMapper(), citaProperties);
 
         paciente = new Paciente("Juan Perez", "1002003004", "3001234567", "juan.perez@mail.com", null);
         medico = new Medico("Dra. Maria Gonzalez", "Cardiologia", "555-1001", "maria.gonzalez@medisalud.com");
@@ -286,6 +288,114 @@ class CitaServiceImplTest {
 
         assertThatThrownBy(() -> citaService.cancelar(cita.getId()))
                 .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void reprogramar_debeCancelarLaAnterior_yCrearUnaNuevaConElNuevoHorario() {
+        LocalDateTime fechaOriginal = LocalDateTime.now().plusDays(3);
+        LocalDateTime fechaNueva = proximoLunesValido();
+        Cita citaOriginal = new Cita(paciente, medico, fechaOriginal);
+        when(citaRepository.findById(citaOriginal.getId())).thenReturn(Optional.of(citaOriginal));
+        when(citaRepository.existsByMedicoIdAndFechaHoraAndEstado(medico.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(false);
+        when(citaRepository.existsByPacienteIdAndFechaHoraAndEstado(paciente.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(false);
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CitaResponse response = citaService.reprogramar(citaOriginal.getId(), fechaNueva);
+
+        assertThat(citaOriginal.getEstado()).isEqualTo(EstadoCita.CANCELADA);
+        assertThat(response.estado()).isEqualTo(EstadoCita.PROGRAMADA);
+        assertThat(response.fechaHora()).isEqualTo(fechaNueva);
+        assertThat(response.id()).isNotEqualTo(citaOriginal.getId());
+    }
+
+    @Test
+    void reprogramar_debeLanzarResourceNotFoundException_cuandoLaCitaNoExiste() {
+        UUID idInexistente = UUID.randomUUID();
+        when(citaRepository.findById(idInexistente)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> citaService.reprogramar(idInexistente, proximoLunesValido()))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void reprogramar_debeLanzarConflictException_cuandoLaCitaActualNoEstaProgramada() {
+        Cita cita = new Cita(paciente, medico, LocalDateTime.now().plusDays(1));
+        cita.setEstado(EstadoCita.CANCELADA);
+        when(citaRepository.findById(cita.getId())).thenReturn(Optional.of(cita));
+
+        assertThatThrownBy(() -> citaService.reprogramar(cita.getId(), proximoLunesValido()))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void reprogramar_debeRegistrarPenalizacion_cuandoLaCancelacionDeLaAnteriorEsTardia() {
+        LocalDateTime fechaOriginal = LocalDateTime.now().plusHours(1);
+        LocalDateTime fechaNueva = proximoLunesValido();
+        Cita citaOriginal = new Cita(paciente, medico, fechaOriginal);
+        when(citaRepository.findById(citaOriginal.getId())).thenReturn(Optional.of(citaOriginal));
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        citaService.reprogramar(citaOriginal.getId(), fechaNueva);
+
+        verify(penalizacionRepository).save(any());
+    }
+
+    @Test
+    void reprogramar_debeLanzarConflictException_cuandoElNuevoHorarioYaEstaOcupadoPorElMedico() {
+        LocalDateTime fechaOriginal = LocalDateTime.now().plusDays(3);
+        LocalDateTime fechaNueva = proximoLunesValido();
+        Cita citaOriginal = new Cita(paciente, medico, fechaOriginal);
+        when(citaRepository.findById(citaOriginal.getId())).thenReturn(Optional.of(citaOriginal));
+        when(citaRepository.existsByMedicoIdAndFechaHoraAndEstado(medico.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> citaService.reprogramar(citaOriginal.getId(), fechaNueva))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void reprogramar_debeLanzarConflictException_cuandoElNuevoHorarioYaLoTieneElPacienteConOtroMedico() {
+        LocalDateTime fechaOriginal = LocalDateTime.now().plusDays(3);
+        LocalDateTime fechaNueva = proximoLunesValido();
+        Cita citaOriginal = new Cita(paciente, medico, fechaOriginal);
+        when(citaRepository.findById(citaOriginal.getId())).thenReturn(Optional.of(citaOriginal));
+        when(citaRepository.existsByMedicoIdAndFechaHoraAndEstado(medico.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(false);
+        when(citaRepository.existsByPacienteIdAndFechaHoraAndEstado(paciente.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> citaService.reprogramar(citaOriginal.getId(), fechaNueva))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void reprogramar_debeLanzarBusinessRuleException_cuandoElNuevoHorarioNoEsValido() {
+        LocalDateTime fechaOriginal = LocalDateTime.now().plusDays(3);
+        Cita citaOriginal = new Cita(paciente, medico, fechaOriginal);
+        when(citaRepository.findById(citaOriginal.getId())).thenReturn(Optional.of(citaOriginal));
+
+        assertThatThrownBy(() -> citaService.reprogramar(citaOriginal.getId(), proximoDomingo()))
+                .isInstanceOf(BusinessRuleException.class);
+    }
+
+    @Test
+    void reprogramar_noDebeAplicarElBloqueoPorPenalizaciones_aunqueElPacienteTenga3OMas() {
+        LocalDateTime fechaOriginal = LocalDateTime.now().plusDays(3);
+        LocalDateTime fechaNueva = proximoLunesValido();
+        Cita citaOriginal = new Cita(paciente, medico, fechaOriginal);
+        when(citaRepository.findById(citaOriginal.getId())).thenReturn(Optional.of(citaOriginal));
+        when(citaRepository.existsByMedicoIdAndFechaHoraAndEstado(medico.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(false);
+        when(citaRepository.existsByPacienteIdAndFechaHoraAndEstado(paciente.getId(), fechaNueva, EstadoCita.PROGRAMADA))
+                .thenReturn(false);
+        when(citaRepository.save(any(Cita.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CitaResponse response = citaService.reprogramar(citaOriginal.getId(), fechaNueva);
+
+        assertThat(response.estado()).isEqualTo(EstadoCita.PROGRAMADA);
+        verify(penalizacionRepository, never()).countByPacienteIdAndFechaPenalizacionAfter(any(), any());
     }
 
     @Test

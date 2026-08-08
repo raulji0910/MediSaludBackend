@@ -15,9 +15,11 @@ MVP backend para digitalizar el agendamiento de citas de la clínica MediSalud: 
   - [Citas (RF-03)](#citas-rf-03)
   - [Disponibilidad (RF-04)](#disponibilidad-rf-04)
   - [Cancelación (RF-05)](#cancelación-rf-05)
+  - [Reprogramación (RN-06)](#reprogramación-rn-06)
   - [Marcar cita como atendida (extra, no pedido explícitamente)](#marcar-cita-como-atendida-extra-no-pedido-explícitamente)
   - [Listado de citas (RF-06)](#listado-de-citas-rf-06)
 - [Reglas de negocio implementadas](#reglas-de-negocio-implementadas)
+- [Configuración de reglas de negocio](#configuración-de-reglas-de-negocio)
 
 ## Tecnologías utilizadas
 
@@ -74,6 +76,8 @@ com.ceiba.medisalud
 - **`HolidayPolicy` como punto de extensión (OCP)**: el enunciado exige que no haya atención en "domingos y festivos" pero no entrega un calendario de festivos. En vez de dejarlo sin resolver o inventar fechas, se modeló como una interfaz consumida por `HorarioAtencionPolicy`; la implementación por defecto (`SinFestivosConfiguradosPolicy`) no marca ningún día como festivo. Conectar el calendario real de festivos colombianos el día de mañana es agregar una implementación nueva, sin tocar la lógica de horarios.
 - **Límite conocido de RN-02/RN-04 bajo concurrencia**: a diferencia de la unicidad del documento del paciente (que sí tiene un constraint único en base de datos), la no-duplicidad de citas por médico/paciente en una misma franja se valida a nivel de servicio dentro de la transacción, porque la condición depende del `estado` de la cita (`PROGRAMADA`), no de una combinación de columnas siempre única — un índice único parcial no es portable entre motores de base de datos de forma sencilla. Es una limitación aceptada y documentada para el alcance de este MVP.
 - **`CitaSpecifications` (patrón Specification) para RF-06**: el listado de citas tiene 4 filtros opcionales combinables entre sí (médico, paciente, estado, rango de fechas). En vez de un método de repositorio con banderas nulas y una cadena de `if` armando SQL a mano, cada filtro es una `Specification<Cita>` independiente que se compone con `.and(...)` solo si el parámetro fue enviado. Agregar un filtro nuevo en el futuro es sumar una `Specification` más, sin tocar las que ya existen (OCP) — y cada una se puede probar por separado.
+- **`CitaProperties` (`@ConfigurationProperties`) para los números de RN-01 y RN-05**: los umbrales de negocio (duración de la franja, horario de apertura/cierre, horas mínimas para cancelar sin penalización, ventana de 30 días, máximo de penalizaciones permitidas) no están como constantes fijas en `CitaServiceImpl`/`HorarioAtencionPolicy`, sino en `application.yml` bajo `medisalud.citas`. Ver detalle en [Configuración de reglas de negocio](#configuración-de-reglas-de-negocio).
+- **`cancelarInternamente` compartido entre `cancelar` y `reprogramar`**: RN-06 dice literalmente "cancelar la cita anterior (aplicando RN-05 si corresponde)" — en vez de reimplementar esa lógica, `reprogramar` reutiliza el mismo método privado que usa el endpoint de cancelación (DRY). Al estar ambos dentro del mismo método `@Transactional`, si la validación del nuevo horario falla *después* de cancelar la cita original, toda la operación se revierte — no queda la cita vieja cancelada sin una nueva creada.
 
 ## Ejecución local
 
@@ -504,6 +508,68 @@ PUT /api/citas/5c415597-ecd7-4928-8f81-ab7ddc3ecdc7/cancelar
 
 ---
 
+### Reprogramación (RN-06)
+
+Reprograma una cita: cancela la actual y crea una nueva con el horario indicado, en una sola operación transaccional. Sigue literalmente los 3 pasos de RN-06:
+
+1. Cancela la cita anterior, aplicando RN-05 si la cancelación es tardía (menos de 2 horas de antelación) — igual que `cancelar`, puede dejar registrada una penalización.
+2. Crea una nueva cita con el mismo paciente y médico, en el nuevo horario.
+3. Valida que el nuevo horario esté disponible (RN-02 y RN-04). También se valida RN-01 (franja válida) y RN-03 (edad), por ser invariantes de cualquier cita — pero **no** se vuelve a aplicar el bloqueo por 3+ penalizaciones de RN-05, porque el enunciado solo pide validar RN-02/RN-04 en este paso y reprogramar no es un agendamiento nuevo.
+
+Si el paso 3 falla (por ejemplo, el nuevo horario ya está ocupado), toda la operación se revierte — la cita original permanece `PROGRAMADA`, no queda cancelada "en el aire" sin una nueva cita creada.
+
+#### `PUT /api/citas/{id}/reprogramar` — Reprogramar una cita
+
+**Request**
+
+```http
+PUT /api/citas/25070f8d-2e08-4778-8fd1-c5ce0dfcedbb/reprogramar
+Content-Type: application/json
+
+{
+  "nuevaFechaHora": "2026-08-10T10:00:00"
+}
+```
+
+**Response — 201 Created** (la nueva cita; tiene un id distinto al de la cita original)
+
+```http
+Location: /api/citas/b24b0782-9209-4393-8bd7-811600a4d28d
+Content-Type: application/json
+
+{
+  "id": "b24b0782-9209-4393-8bd7-811600a4d28d",
+  "pacienteId": "2b40b1cf-ac43-4937-827b-1eabf270fb9e",
+  "pacienteNombre": "Carla Mendez",
+  "medicoId": "a1a1a1a1-0001-4000-8000-000000000001",
+  "medicoNombre": "Dra. Maria Gonzalez",
+  "medicoEspecialidad": "Cardiologia",
+  "fechaHora": "2026-08-10T10:00:00",
+  "estado": "PROGRAMADA",
+  "fechaCancelacion": null,
+  "creadoEn": "2026-08-08T22:29:23.620288Z"
+}
+```
+
+**Response — 404 Not Found**: si la cita original no existe.
+
+**Response — 409 Conflict**: si la cita original no está en estado `PROGRAMADA`, o si el nuevo horario ya está ocupado (RN-02/RN-04).
+
+```json
+{
+  "timestamp": "2026-08-08T22:29:23.957999Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Solo se pueden reprogramar citas en estado PROGRAMADA",
+  "path": "/api/citas/25070f8d-2e08-4778-8fd1-c5ce0dfcedbb/reprogramar",
+  "validationErrors": null
+}
+```
+
+**Response — 400 Bad Request**: si el nuevo horario no corresponde a una franja válida (RN-01) o `nuevaFechaHora` no se envía.
+
+---
+
 ### Marcar cita como atendida (extra, no pedido explícitamente)
 
 > **Nota de alcance:** este endpoint **no está pedido por ningún RF ni RN del enunciado**. Se agregó porque `ATENDIDA` es uno de los tres valores del estado de una cita y RF-06 explícitamente lo lista como filtro válido (`estado: PROGRAMADA, CANCELADA, ATENDIDA`) — pero sin este endpoint, `ATENDIDA` era un estado inalcanzable: se podía filtrar por él, pero ninguna operación del sistema lo producía jamás. Se agregó el endpoint simétrico a la cancelación para cerrar ese vacío, deliberadamente simple (solo valida que la cita esté `PROGRAMADA`, sin reglas de negocio adicionales, porque el enunciado no describe ninguna para esta transición).
@@ -607,9 +673,9 @@ Otros ejemplos válidos: `GET /api/citas?estado=CANCELADA`, `GET /api/citas?paci
 | RN-04 — Un paciente no puede tener dos citas en la misma franja, sin importar el médico (conflicto global de agenda) | ✅ | `CitaService.reservar` → `409` |
 | RN-05 (parte 1) — Bloquear el agendamiento si el paciente tiene 3+ penalizaciones en 30 días | ✅ | `CitaService.reservar` → `400` |
 | RN-05 (parte 2) — Registrar la penalización al cancelar con menos de 2h de antelación | ✅ | `CitaService.cancelar` → `PUT /api/citas/{id}/cancelar` |
-| RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ⏳ Pendiente | Se implementa a continuación |
+| RN-06 — Reprogramación (cancelar + crear nueva, validando disponibilidad) | ✅ | `CitaService.reprogramar` → `PUT /api/citas/{id}/reprogramar` |
 
-*La sección de Citas se seguirá ampliando con RN-06 (reprogramación).*
+Con RN-06, **todas las reglas de negocio del enunciado quedan implementadas.**
 
 ## Decisiones fuera del enunciado
 
@@ -620,3 +686,24 @@ Estas no fueron pedidas explícitamente por ningún RF/RN, pero se agregaron con
 | `GET /api/pacientes/documento/{documentoIdentidad}` | Quien agenda una cita en la vida real tiene a mano el documento del paciente, no su id interno. Ver sección [Pacientes (RF-02)](#pacientes-rf-02). |
 | `PUT /api/citas/{id}/atender` | `ATENDIDA` es un estado listado como filtro válido en RF-06 pero, sin este endpoint, nunca era alcanzable. Ver sección [Marcar cita como atendida](#marcar-cita-como-atendida-extra-no-pedido-explícitamente). |
 | No agendar citas en fecha/hora pasada | Sentido común no cubierto por RN-01 a RN-06. Ver sección [Citas (RF-03)](#citas-rf-03). |
+| Umbrales de RN-01/RN-05 movidos a `application.yml` | No pedido por el enunciado, pero evita "magic numbers" y permite que un administrador ajuste la política de negocio sin tocar código. Ver [Configuración de reglas de negocio](#configuración-de-reglas-de-negocio). |
+
+## Configuración de reglas de negocio
+
+Los números detrás de RN-01 y RN-05 no están escritos como constantes fijas en `CitaServiceImpl`/`HorarioAtencionPolicy` — viven en `application.yml` bajo `medisalud.citas`, enlazados con un `@ConfigurationProperties` (`CitaProperties`):
+
+```yaml
+medisalud:
+  citas:
+    franja-minutos: 30
+    horario:
+      apertura: "08:00"
+      cierre-entre-semana: "18:00"
+      cierre-sabado: "13:00"
+    penalizacion:
+      horas-minimas-cancelacion: 2
+      dias-ventana: 30
+      max-permitidas: 3
+```
+
+**Por qué así y no en una tabla de la base de datos:** estos valores representan la *política* de la clínica (duración de la franja, horario de atención, cuántas penalizaciones tolerar) — cambian con poca frecuencia, no varias veces al día. Una tabla de `settings` editable en caliente sin reiniciar la app sería más flexible, pero agrega complejidad real que nadie pidió: caché con invalidación, y probablemente un endpoint de administración que no existe (no hay autenticación ni panel admin en el alcance de este MVP). `application.yml` es la solución proporcionada al problema: cambiar cualquiera de estos valores es editar el archivo (o sobreescribirlo con una variable de entorno / `application-prod.yml` por ambiente) y reiniciar — sin tocar una sola línea de `CitaServiceImpl` ni de sus tests.

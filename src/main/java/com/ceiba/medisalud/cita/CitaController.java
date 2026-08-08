@@ -4,6 +4,7 @@ import com.ceiba.medisalud.cita.dto.CancelacionResponse;
 import com.ceiba.medisalud.cita.dto.CitaRequest;
 import com.ceiba.medisalud.cita.dto.CitaResponse;
 import com.ceiba.medisalud.cita.dto.DisponibilidadResponse;
+import com.ceiba.medisalud.cita.dto.ReprogramacionRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -62,6 +63,15 @@ class CitaController {
     @Operation(summary = "Cancelar una cita programada")
     public ResponseEntity<CancelacionResponse> cancelar(@PathVariable UUID id) {
         return ResponseEntity.ok(citaService.cancelar(id));
+    }
+
+    @PutMapping("/{id}/reprogramar")
+    @Operation(summary = "Reprogramar una cita: cancela la actual (aplicando RN-05 si corresponde) y crea "
+            + "una nueva con el horario indicado, validando disponibilidad (RN-02 y RN-04)")
+    public ResponseEntity<CitaResponse> reprogramar(@PathVariable UUID id,
+                                                      @Valid @RequestBody ReprogramacionRequest request) {
+        CitaResponse nuevaCita = citaService.reprogramar(id, request.nuevaFechaHora());
+        return ResponseEntity.created(URI.create("/api/citas/" + nuevaCita.id())).body(nuevaCita);
     }
 
     @PutMapping("/{id}/atender")

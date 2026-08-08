@@ -32,3 +32,19 @@ springdoc:
     operationsSorter: method
   api-docs:
     path: /v3/api-docs
+
+# Parametros de negocio de RN-01 (horario de atencion) y RN-05 (penalizacion por
+# cancelacion tardia). Externalizados aqui para que puedan ajustarse por ambiente
+# (application-prod.yml, variables de entorno, etc.) sin recompilar ni tocar el
+# codigo de CitaServiceImpl/HorarioAtencionPolicy. Ver justificacion en el README.
+medisalud:
+  citas:
+    franja-minutos: 30
+    horario:
+      apertura: "08:00"
+      cierre-entre-semana: "18:00"
+      cierre-sabado: "13:00"
+    penalizacion:
+      horas-minimas-cancelacion: 2
+      dias-ventana: 30
+      max-permitidas: 3
