@@ -31,3 +31,6 @@ build/
 .vscode/
 
 *.log
+
+### Contexto local (contiene datos de infraestructura, no publicar) ###
+CLAUDE.md
